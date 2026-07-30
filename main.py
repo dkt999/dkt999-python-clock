@@ -356,6 +356,12 @@ class WorldClockWidget(QWidget):
             ("Africa/Lagos", "Nigeria (Lagos)"),
         ]
 
+        default_tzs = [
+            "Asia/Ho_Chi_Minh", # Việt Nam (Hà Nội/HCMC)
+            "Asia/Tokyo",       # Nhật Bản (Tokyo)
+            "Asia/Shanghai",    # Trung Quốc (Beijing/Shanghai)
+            "America/New_York"  # Mỹ (New York)
+        ]
         self.is_24h_format = self.settings.value("is_24h_format", True, type=bool)
         self.show_seconds = self.settings.value("show_seconds", True, type=bool)
         
@@ -363,7 +369,7 @@ class WorldClockWidget(QWidget):
         if saved_tzs and isinstance(saved_tzs, list):
             self.enabled_tzs = saved_tzs
         else:
-            self.enabled_tzs = [c[0] for c in self.all_cities]
+            self.enabled_tzs = default_tzs
 
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(15, 15, 15, 15)
@@ -947,7 +953,15 @@ class TimerWidget(QWidget):
 
     def load_settings(self):
         saved = self.settings.value("saved_timers")
-        if saved:
+        
+        # Nếu chưa từng có dữ liệu lưu -> Tạo mặc định 5 phút (300s) và 10 phút (600s)
+        if not saved:
+            default_timers = [300, 600] # 5 mins & 10 mins
+            for secs in default_timers:
+                self.saved_timers_list.append(secs)
+                self.add_saved_timer_ui(secs)
+            self.save_settings()
+        else:
             if not isinstance(saved, list):
                 saved = [saved]
             for s in saved:
