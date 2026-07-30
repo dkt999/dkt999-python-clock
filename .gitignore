@@ -158,6 +158,8 @@ venv-build/
 ENV/
 env.bak/
 venv.bak/
+pkgroot_deb/
+installer/
 
 # Spyder project settings
 .spyderproject

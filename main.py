@@ -2,9 +2,11 @@ import sys
 import os
 import platform
 import subprocess
+import shutil
 from PyQt6.QtCore import Qt, QTimer, QTime, QDateTime, QTimeZone, QPoint, QPointF, QUrl, QSettings
 from PyQt6.QtGui import QIcon, QAction, QCloseEvent, QPainter, QColor, QPen, QBrush, QIntValidator
 from PyQt6.QtMultimedia import QSoundEffect
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                              QSystemTrayIcon, QMenu, QStackedWidget, QFrame, QLabel, QGridLayout, QSizePolicy)
 from qfluentwidgets import (FluentWindow, LargeTitleLabel, PrimaryPushButton, 
@@ -12,6 +14,24 @@ from qfluentwidgets import (FluentWindow, LargeTitleLabel, PrimaryPushButton,
                             TransparentToolButton, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
                             NavigationItemPosition, SwitchButton, CheckBox, TitleLabel, SubtitleLabel,
                             ComboBox, CardWidget)
+
+def send_linux_notification(title, content, app_name="DK Clock"):
+    """Gửi thông báo Pop-up Banner chuẩn Linux/Ubuntu thông qua notify-send"""
+    if platform.system() == "Linux":
+        notify_path = shutil.which("notify-send")
+        if notify_path:
+            try:
+                # Tham số -u critical giúp banner ưu tiên nổi lên màn hình và giữ lâu hơn
+                subprocess.Popen([
+                    notify_path,
+                    "-u", "critical",          # Mức độ ưu tiên cao
+                    "-a", app_name,            # Tên ứng dụng
+                    "-i", "alarm-symbolic",    # Biểu tượng thông báo OS
+                    title,
+                    content
+                ])
+            except Exception as e:
+                print(f"Failed to send native notification: {e}")
 
 class CustomTimePicker(QWidget):
     def __init__(self, is_24h_format=True, parent=None):
@@ -22,15 +42,15 @@ class CustomTimePicker(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # Ô nhập Giờ
+        # Hour input
         self.hour_input = LineEdit(self)
         self.hour_input.setPlaceholderText("HH")
-        self.hour_input.setMaxLength(2) # Giới hạn tối đa 2 ký tự
+        self.hour_input.setMaxLength(2)
         
-        # Ô nhập Phút
+        # Minute input
         self.minute_input = LineEdit(self)
         self.minute_input.setPlaceholderText("MM")
-        self.minute_input.setMaxLength(2) # Giới hạn tối đa 2 ký tự
+        self.minute_input.setMaxLength(2)
 
         # Select AM / PM
         self.ampm_combo = ComboBox(self)
@@ -40,19 +60,18 @@ class CustomTimePicker(QWidget):
         layout.addWidget(self.minute_input)
         layout.addWidget(self.ampm_combo)
 
-        # 1. Bắt sự kiện realtime ngay khi gõ phím
+        # Realtime input validation
         self.hour_input.textChanged.connect(self._on_hour_changed)
         self.minute_input.textChanged.connect(self._on_minute_changed)
 
-        # 2. Bắt sự kiện khi rời ô (blur) để auto fill số 0 (ví dụ "5" -> "05")
+        # Format on blur / enter
         self.hour_input.editingFinished.connect(self._format_hour_on_finish)
         self.minute_input.editingFinished.connect(self._format_minute_on_finish)
 
-        # Áp dụng chế độ 12h hay 24h
+        # Apply 12h or 24h mode
         self.set_format_24h(self.is_24h)
 
     def set_format_24h(self, is_24h: bool):
-        """Cấu hình lại chế độ 12h hoặc 24h"""
         self.is_24h = is_24h
         
         if self.is_24h:
@@ -68,7 +87,6 @@ class CustomTimePicker(QWidget):
         self._format_hour_on_finish()
 
     def set_time(self, qtime: QTime):
-        """Đặt thời gian cho Picker từ QTime"""
         h = qtime.hour()
         m = qtime.minute()
 
@@ -83,12 +101,9 @@ class CustomTimePicker(QWidget):
         self.hour_input.setText(f"{h:02d}")
         self.minute_input.setText(f"{m:02d}")
 
-    # --- XỬ LÝ KHỐNG CHẾ TRONG LÚC ĐANG GÕ (REAL-TIME) ---
     def _on_hour_changed(self, text):
         if not text:
             return
-        
-        # Nếu nhập ký tự không phải số -> xóa ngay
         if not text.isdigit():
             self.hour_input.setText("".join(filter(str.isdigit, text)))
             return
@@ -96,7 +111,6 @@ class CustomTimePicker(QWidget):
         val = int(text)
         max_val = 23 if self.is_24h else 12
 
-        # Nếu giá trị lớn hơn max_val -> gán lại bằng max_val ngay lập tức
         if val > max_val:
             self.hour_input.setText(str(max_val))
 
@@ -109,11 +123,9 @@ class CustomTimePicker(QWidget):
             return
 
         val = int(text)
-        # Phút chỉ từ 0 đến 59
         if val > 59:
             self.minute_input.setText("59")
 
-    # --- XỬ LÝ FORMAT KHI RỜI Ô INPUT (BLUR / ENTER) ---
     def _format_hour_on_finish(self):
         text = self.hour_input.text().strip()
         min_val = 1 if not self.is_24h else 0
@@ -144,7 +156,6 @@ class CustomTimePicker(QWidget):
         self.minute_input.setText(f"{val:02d}")
 
     def get_time_string(self) -> str:
-        """Trả về thời gian dạng chuẩn HH:mm 24h để lưu Database/Báo thức"""
         h_text = self.hour_input.text().strip()
         m_text = self.minute_input.text().strip()
 
@@ -159,6 +170,7 @@ class CustomTimePicker(QWidget):
                 h = 0
 
         return f"{h:02d}:{m:02d}"
+
 # ==============================================================================
 # 1. TAB WORLD CLOCK
 # ==============================================================================
@@ -293,17 +305,55 @@ class WorldClockWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("worldClockWidget")
-        self.settings = QSettings("UbuntuClock", "WorldClockSettings")
+        self.settings = QSettings("DKClock", "WorldClockSettings")
 
         self.all_cities = [
-            ("Asia/Ho_Chi_Minh", "Việt Nam (Hà Nội)"),
-            ("Asia/Tokyo", "Nhật Bản (Tokyo)"),
-            ("Asia/Seoul", "Hàn Quốc (Seoul)"),
-            ("Europe/London", "Anh (London)"),
-            ("Europe/Paris", "Pháp (Paris)"),
-            ("America/New_York", "Mỹ (New York)"),
-            ("America/Los_Angeles", "Mỹ (Los Angeles)"),
-            ("Australia/Sydney", "Úc (Sydney)"),
+            # --- ASIA / PACIFIC ---
+            ("Asia/Ho_Chi_Minh", "Vietnam (Hanoi/HCMC)"),
+            ("Asia/Tokyo", "Japan (Tokyo)"),
+            ("Asia/Seoul", "South Korea (Seoul)"),
+            ("Asia/Bangkok", "Thailand (Bangkok)"),
+            ("Asia/Singapore", "Singapore"),
+            ("Asia/Jakarta", "Indonesia (Jakarta)"),
+            ("Asia/Shanghai", "China (Beijing/Shanghai)"),
+            ("Asia/Hong_Kong", "Hong Kong"),
+            ("Asia/Taipei", "Taiwan (Taipei)"),
+            ("Asia/Manila", "Philippines (Manila)"),
+            ("Asia/Kolkata", "India (New Delhi)"),
+            ("Asia/Dubai", "UAE (Dubai)"),
+            ("Asia/Riyadh", "Saudi Arabia (Riyadh)"),
+            
+            # --- EUROPE ---
+            ("Europe/London", "UK (London)"),
+            ("Europe/Paris", "France (Paris)"),
+            ("Europe/Berlin", "Germany (Berlin)"),
+            ("Europe/Rome", "Italy (Rome)"),
+            ("Europe/Madrid", "Spain (Madrid)"),
+            ("Europe/Moscow", "Russia (Moscow)"),
+            ("Europe/Athens", "Greece (Athens)"),
+            ("Europe/Amsterdam", "Netherlands (Amsterdam)"),
+
+            # --- AMERICAS ---
+            ("America/New_York", "USA (New York - Eastern)"),
+            ("America/Chicago", "USA (Chicago - Central)"),
+            ("America/Denver", "USA (Denver - Mountain)"),
+            ("America/Los_Angeles", "USA (Los Angeles - Pacific)"),
+            ("America/Toronto", "Canada (Toronto)"),
+            ("America/Vancouver", "Canada (Vancouver)"),
+            ("America/Mexico_City", "Mexico (Mexico City)"),
+            ("America/Sao_Paulo", "Brazil (São Paulo)"),
+            ("America/Argentina/Buenos_Aires", "Argentina (Buenos Aires)"),
+
+            # --- AUSTRALIA & OCEANIA ---
+            ("Australia/Sydney", "Australia (Sydney)"),
+            ("Australia/Melbourne", "Australia (Melbourne)"),
+            ("Australia/Perth", "Australia (Perth)"),
+            ("Pacific/Auckland", "New Zealand (Auckland)"),
+
+            # --- AFRICA ---
+            ("Africa/Cairo", "Egypt (Cairo)"),
+            ("Africa/Johannesburg", "South Africa (Johannesburg)"),
+            ("Africa/Lagos", "Nigeria (Lagos)"),
         ]
 
         self.is_24h_format = self.settings.value("is_24h_format", True, type=bool)
@@ -321,21 +371,21 @@ class WorldClockWidget(QWidget):
         self.top_bar = QHBoxLayout()
         
         self.format_switch = SwitchButton(self)
-        self.format_switch.setOnText("24 Giờ")
-        self.format_switch.setOffText("12 Giờ")
+        self.format_switch.setOnText("24-Hour")
+        self.format_switch.setOffText("12-Hour")
         self.format_switch.setChecked(self.is_24h_format)
         self.format_switch.checkedChanged.connect(self.toggle_format)
 
         self.sec_switch = SwitchButton(self)
-        self.sec_switch.setOnText("Hiện giây")
-        self.sec_switch.setOffText("Ẩn giây")
+        self.sec_switch.setOnText("Show Seconds")
+        self.sec_switch.setOffText("Hide Seconds")
         self.sec_switch.setChecked(self.show_seconds)
         self.sec_switch.checkedChanged.connect(self.toggle_seconds)
 
-        self.config_btn = PushButton("Cài đặt múi giờ", self, FIF.SETTING)
+        self.config_btn = PushButton("Timezone Settings", self, FIF.SETTING)
         self.config_btn.clicked.connect(self.toggle_settings_panel)
 
-        self.top_bar.addWidget(QLabel("Định dạng:"))
+        self.top_bar.addWidget(QLabel("Format:"))
         self.top_bar.addWidget(self.format_switch)
         self.top_bar.addSpacing(15)
         self.top_bar.addWidget(self.sec_switch)
@@ -354,15 +404,23 @@ class WorldClockWidget(QWidget):
         self.grid_layout.setSpacing(12)
         self.grid_scroll.setWidget(self.grid_scroll_content)
 
+        # --- BẢNG SETTINGS MÚI GIỜ (ĐÃ CHỈNH NÚT DONE RA NGOÀI SCROLL) ---
+        self.settings_panel = QWidget()
+        settings_main_layout = QVBoxLayout(self.settings_panel)
+        settings_main_layout.setContentsMargins(0, 0, 0, 0)
+        settings_main_layout.setSpacing(10)
+
+        # Title cố định phía trên
+        self.settings_title = SubtitleLabel("Select timezones to display:")
+        settings_main_layout.addWidget(self.settings_title)
+
+        # Scroll Area chỉ chứa danh sách Checkbox
         self.settings_scroll = SmoothScrollArea(self)
         self.settings_scroll.setWidgetResizable(True)
         self.settings_content = QWidget()
         self.settings_layout = QVBoxLayout(self.settings_content)
         self.settings_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.settings_layout.setSpacing(10)
-        
-        self.settings_title = SubtitleLabel("Chọn các múi giờ muốn hiển thị:")
-        self.settings_layout.addWidget(self.settings_title)
         
         self.checkboxes = {}
         for tz_id, country in self.all_cities:
@@ -372,15 +430,17 @@ class WorldClockWidget(QWidget):
             self.settings_layout.addWidget(cb)
             self.checkboxes[tz_id] = cb
 
-        self.back_btn = PrimaryPushButton("Xong", self)
-        self.back_btn.clicked.connect(self.toggle_settings_panel)
-        self.settings_layout.addSpacing(10)
-        self.settings_layout.addWidget(self.back_btn)
-
         self.settings_scroll.setWidget(self.settings_content)
+        settings_main_layout.addWidget(self.settings_scroll, stretch=1)
 
+        # Nút Done CỐ ĐỊNH ở phía dưới cùng (ngoài Scroll)
+        self.back_btn = PrimaryPushButton("Done", self)
+        self.back_btn.clicked.connect(self.toggle_settings_panel)
+        settings_main_layout.addWidget(self.back_btn)
+
+        # Thêm vào content stack
         self.content_stack.addWidget(self.grid_scroll)
-        self.content_stack.addWidget(self.settings_scroll)
+        self.content_stack.addWidget(self.settings_panel) # Dùng settings_panel mới thay cho settings_scroll
 
         self.main_layout.addWidget(self.content_stack)
 
@@ -399,10 +459,10 @@ class WorldClockWidget(QWidget):
     def toggle_settings_panel(self):
         if self.content_stack.currentIndex() == 0:
             self.content_stack.setCurrentIndex(1)
-            self.config_btn.setText("Quay lại")
+            self.config_btn.setText("Back")
         else:
             self.content_stack.setCurrentIndex(0)
-            self.config_btn.setText("Cài đặt múi giờ")
+            self.config_btn.setText("Timezone Settings")
 
     def toggle_format(self, checked):
         self.is_24h_format = checked
@@ -461,7 +521,7 @@ class WorldClockWidget(QWidget):
 
 
 # ==============================================================================
-# 2. TAB ALARM (HẸN GIỜ MỚI)
+# 2. TAB ALARM
 # ==============================================================================
 class AlarmGridItem(QFrame):
     def __init__(self, time_str, label_text, is_enabled, alarm_id, parent_widget):
@@ -488,7 +548,7 @@ class AlarmGridItem(QFrame):
         t_font.setBold(True)
         self.time_lbl.setFont(t_font)
 
-        self.tag_lbl = CaptionLabel(label_text if label_text else "Báo thức")
+        self.tag_lbl = CaptionLabel(label_text if label_text else "Alarm")
 
         info_layout.addWidget(self.time_lbl)
         info_layout.addWidget(self.tag_lbl)
@@ -529,8 +589,8 @@ class AlarmWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("alarmWidget")
-        self.settings = QSettings("UbuntuClock", "AlarmSettings")
-        self.world_settings = QSettings("UbuntuClock", "WorldClockSettings") # Đọc chung cấu hình 12h/24h
+        self.settings = QSettings("DKClock", "AlarmSettings")
+        self.world_settings = QSettings("DKClock", "WorldClockSettings")
         self.alarms = []
         self.current_infobar = None
 
@@ -545,7 +605,7 @@ class AlarmWidget(QWidget):
         self.main_layout.setContentsMargins(15, 15, 15, 15)
 
         top_bar = QHBoxLayout()
-        self.add_btn = PrimaryPushButton("Thêm báo thức", self, FIF.ADD)
+        self.add_btn = PrimaryPushButton("Add Alarm", self, FIF.ADD)
         self.add_btn.clicked.connect(self.show_add_panel)
         top_bar.addStretch(1)
         top_bar.addWidget(self.add_btn)
@@ -553,7 +613,7 @@ class AlarmWidget(QWidget):
 
         self.content_stack = QStackedWidget(self)
 
-        # PAGE 1: Lưới danh sách
+        # PAGE 1: Alarm list grid
         self.grid_scroll = SmoothScrollArea(self)
         self.grid_scroll.setWidgetResizable(True)
         self.grid_scroll_content = QWidget()
@@ -562,31 +622,30 @@ class AlarmWidget(QWidget):
         self.grid_layout.setSpacing(12)
         self.grid_scroll.setWidget(self.grid_scroll_content)
 
-        # PAGE 2: Form Thêm báo thức mới
+        # PAGE 2: Add alarm form
         self.add_panel = QWidget()
         add_layout = QVBoxLayout(self.add_panel)
         add_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         add_layout.setSpacing(15)
 
-        # Đọc định dạng 12h/24h trực tiếp từ Cài đặt
         is_24h_config = self.world_settings.value("is_24h_format", True, type=bool)
         
         self.time_picker = CustomTimePicker(is_24h_format=is_24h_config, parent=self)
         self.time_picker.setFixedSize(280, 40)
 
         self.label_input = LineEdit(self)
-        self.label_input.setPlaceholderText("Ghi chú báo thức (Ví dụ: Thức dậy, Học bài...)")
+        self.label_input.setPlaceholderText("Alarm note (e.g. Wake up, Study...)")
         self.label_input.setFixedSize(280, 40)
 
         btn_row = QHBoxLayout()
-        self.save_btn = PrimaryPushButton("Lưu", self)
-        self.cancel_btn = PushButton("Hủy", self)
+        self.save_btn = PrimaryPushButton("Save", self)
+        self.cancel_btn = PushButton("Cancel", self)
         self.save_btn.clicked.connect(self.save_new_alarm)
         self.cancel_btn.clicked.connect(self.hide_add_panel)
         btn_row.addWidget(self.save_btn)
         btn_row.addWidget(self.cancel_btn)
 
-        add_layout.addWidget(SubtitleLabel("Chọn thời gian hẹn giờ:"))
+        add_layout.addWidget(SubtitleLabel("Select Alarm Time:"))
         add_layout.addWidget(self.time_picker)
         add_layout.addWidget(self.label_input)
         add_layout.addLayout(btn_row)
@@ -604,7 +663,6 @@ class AlarmWidget(QWidget):
         self.check_timer.start(1000)
 
     def show_add_panel(self):
-        # Cập nhật định dạng 12h/24h mới nhất mỗi khi mở form
         is_24h_config = self.world_settings.value("is_24h_format", True, type=bool)
         self.time_picker.set_format_24h(is_24h_config)
         self.time_picker.set_time(QTime.currentTime())
@@ -617,7 +675,6 @@ class AlarmWidget(QWidget):
         self.add_btn.setVisible(True)
 
     def save_new_alarm(self):
-        # Đã sửa: Lấy chuỗi thời gian HH:mm 24h chuẩn từ time_picker
         time_str = self.time_picker.get_time_string()
         label_text = self.label_input.text().strip()
         alarm_id = str(QDateTime.currentMSecsSinceEpoch())
@@ -672,9 +729,10 @@ class AlarmWidget(QWidget):
                     if self.alarm_sound.source().isValid():
                         self.alarm_sound.play()
 
+                    # 1. InfoBar trên ứng dụng
                     self.current_infobar = InfoBar.success(
-                        title='BÁO THỨC!',
-                        content=f"Đã đến giờ: {alarm['time']} ({alarm['label']})",
+                        title='ALARM!',
+                        content=f"Time's up: {alarm['time']} ({alarm['label']})",
                         orient=Qt.Orientation.Horizontal,
                         isClosable=True,
                         position=InfoBarPosition.TOP,
@@ -682,6 +740,31 @@ class AlarmWidget(QWidget):
                         parent=self
                     )
                     self.current_infobar.closedSignal.connect(self.stop_alarm_sound)
+
+                    # 2. Bắn Pop-up Banner chuẩn Ubuntu
+                    send_linux_notification(
+                        "ALARM!",
+                        f"Time's up: {alarm['time']} ({alarm['label']})"
+                    )
+
+                    # 3. Vẫn giữ Tray Icon message cho Windows/macOS
+                    main_window = self.window()
+                    if hasattr(main_window, 'tray_icon'):
+                        try:
+                            main_window.tray_icon.messageClicked.disconnect()
+                        except:
+                            pass
+
+                        main_window.tray_icon.messageClicked.connect(
+                            lambda: (main_window.switch_to_tab(1), self.stop_alarm_sound())
+                        )
+
+                        main_window.tray_icon.showMessage(
+                            "ALARM!",
+                            f"Time's up: {alarm['time']} ({alarm['label']})",
+                            QSystemTrayIcon.MessageIcon.Information,
+                            10000
+                        )
 
     def rebuild_grid(self):
         for i in reversed(range(self.grid_layout.count())): 
@@ -777,7 +860,7 @@ class TimerWidget(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.current_infobar = None
         
-        self.settings = QSettings("UbuntuClock", "TimerSettings")
+        self.settings = QSettings("DKClock", "TimerSettings")
         self.saved_timers_list = []
 
         self.alarm_sound = QSoundEffect(self)
@@ -811,9 +894,9 @@ class TimerWidget(QWidget):
         self.btn_layout = QHBoxLayout()
         self.btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        self.start_btn = PrimaryPushButton("Bắt đầu", self)
-        self.stop_btn = PushButton("Tạm dừng", self)
-        self.reset_btn = PushButton("Đặt lại", self)
+        self.start_btn = PrimaryPushButton("Start", self)
+        self.stop_btn = PushButton("Pause", self)
+        self.reset_btn = PushButton("Reset", self)
         self.stop_btn.setEnabled(False) 
         
         self.btn_layout.addWidget(self.start_btn)
@@ -832,7 +915,6 @@ class TimerWidget(QWidget):
         self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.scroll_layout.setContentsMargins(10, 10, 10, 10)
         self.scroll_layout.setSpacing(10)
-        
 
         self.scroll_area.setWidget(self.scroll_content)
         self.main_layout.addWidget(self.scroll_area)
@@ -862,7 +944,6 @@ class TimerWidget(QWidget):
 
     def check_empty_state(self):
         has_items = len(self.saved_timers_list) > 0
-
 
     def load_settings(self):
         saved = self.settings.value("saved_timers")
@@ -916,7 +997,7 @@ class TimerWidget(QWidget):
                 secs = 0
                 
             if secs == 0:
-                InfoBar.warning("Lỗi", "Vui lòng nhập thời gian lớn hơn 0.", parent=self, duration=2000)
+                InfoBar.warning("Error", "Please enter a duration greater than 0.", parent=self, duration=2000)
                 return
 
             self.remaining_seconds = secs
@@ -928,7 +1009,7 @@ class TimerWidget(QWidget):
         self.time_input.setReadOnly(True) 
         self.timer.start(1000)
         self.is_paused = False
-        self.start_btn.setText("Tiếp tục")
+        self.start_btn.setText("Resume")
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
 
@@ -946,7 +1027,7 @@ class TimerWidget(QWidget):
         self.remaining_seconds = 0
         self.time_input.setReadOnly(False)
         self.time_input.setText("000000")
-        self.start_btn.setText("Bắt đầu")
+        self.start_btn.setText("Start")
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
 
@@ -959,9 +1040,10 @@ class TimerWidget(QWidget):
             if self.alarm_sound.source().isValid():
                 self.alarm_sound.play()
 
+            # 1. InfoBar giao diện
             self.current_infobar = InfoBar.success(
-                title='Hết giờ',
-                content="Thời gian đếm ngược đã kết thúc!",
+                title="Time's Up",
+                content="The countdown timer has finished!",
                 orient=Qt.Orientation.Horizontal,
                 isClosable=True,
                 position=InfoBarPosition.TOP,
@@ -969,6 +1051,29 @@ class TimerWidget(QWidget):
                 parent=self
             )
             self.current_infobar.closedSignal.connect(self.stop_alarm)
+            send_linux_notification(
+                "Timer Finished!",
+                "The countdown timer has finished!"
+            )
+            # 2. Thông báo khay hệ thống OS (Click vào mở ngay Tab Timer)
+            main_window = self.window()
+            if hasattr(main_window, 'tray_icon'):
+                try:
+                    main_window.tray_icon.messageClicked.disconnect()
+                except:
+                    pass
+
+                # Bấm vào notification -> Mở ứng dụng & chuyển sang Tab Timer (Index = 2)
+                main_window.tray_icon.messageClicked.connect(
+                    lambda: (main_window.switch_to_tab(2), self.stop_alarm())
+                )
+
+                main_window.tray_icon.showMessage(
+                    "Timer Finished!",
+                    "The countdown timer has finished!",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    10000
+                )
 
     def update_display_text(self):
         h = self.remaining_seconds // 3600
@@ -1045,9 +1150,9 @@ class StopwatchWidget(QWidget):
         self.btn_layout = QHBoxLayout()
         self.btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        self.start_btn = PrimaryPushButton("Bắt đầu", self)
-        self.lap_btn = PushButton("Đánh dấu", self)
-        self.reset_btn = PushButton("Đặt lại", self)
+        self.start_btn = PrimaryPushButton("Start", self)
+        self.lap_btn = PushButton("Lap", self)
+        self.reset_btn = PushButton("Reset", self)
         self.lap_btn.setEnabled(False)
         
         self.btn_layout.addWidget(self.start_btn)
@@ -1083,12 +1188,12 @@ class StopwatchWidget(QWidget):
     def start_stopwatch(self):
         if not self.is_running:
             self.timer.start(10)
-            self.start_btn.setText("Tạm dừng")
+            self.start_btn.setText("Pause")
             self.lap_btn.setEnabled(True)
             self.is_running = True
         else:
             self.timer.stop()
-            self.start_btn.setText("Tiếp tục")
+            self.start_btn.setText("Resume")
             self.lap_btn.setEnabled(False)
             self.is_running = False
 
@@ -1098,7 +1203,6 @@ class StopwatchWidget(QWidget):
             
         self.lap_count += 1
         time_str = self.time_display.text()
-        
         
         item = LapItem(self.lap_count, time_str, self)
         self.scroll_layout.insertWidget(0, item)
@@ -1114,7 +1218,7 @@ class StopwatchWidget(QWidget):
         self.elapsed_time = 0
         self.lap_count = 0
         
-        self.start_btn.setText("Bắt đầu")
+        self.start_btn.setText("Start")
         self.time_display.setText("00:00:00.00")
         self.lap_btn.setEnabled(False)
 
@@ -1145,30 +1249,30 @@ class StopwatchWidget(QWidget):
 
 
 # ==============================================================================
-# 4. TAB SETTINGS (HỆ THỐNG MỚI)
+# 4. TAB SETTINGS
 # ==============================================================================
 class SettingsWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("settingsWidget")
-        self.settings = QSettings("UbuntuClock", "AppSettings")
+        self.settings = QSettings("DKClock", "AppSettings")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(20)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        title = TitleLabel("Cài đặt hệ thống", self)
+        title = TitleLabel("System Settings", self)
         layout.addWidget(title)
 
-        # Card 1: Khởi động cùng PC
+        # Card 1: Run at startup
         autostart_card = CardWidget(self)
         a_layout = QHBoxLayout(autostart_card)
         a_layout.setContentsMargins(16, 16, 16, 16)
         
         a_info = QVBoxLayout()
-        a_info.addWidget(SubtitleLabel("Khởi động cùng máy tính"))
-        a_info.addWidget(CaptionLabel("Tự động chạy ứng dụng Ubuntu Clock khi đăng nhập PC (Windows/macOS/Linux)"))
+        a_info.addWidget(SubtitleLabel("Run at system startup"))
+        a_info.addWidget(CaptionLabel("Automatically launch DK Clock on system login (Windows/macOS/Linux)"))
         
         self.autostart_switch = SwitchButton(self)
         is_autostart = self.settings.value("autostart", False, type=bool)
@@ -1179,14 +1283,14 @@ class SettingsWidget(QWidget):
         a_layout.addWidget(self.autostart_switch)
         layout.addWidget(autostart_card)
 
-        # Card 2: Chạy ngầm khi bấm X
+        # Card 2: Minimize to tray on close
         tray_card = CardWidget(self)
         t_layout = QHBoxLayout(tray_card)
         t_layout.setContentsMargins(16, 16, 16, 16)
 
         t_info = QVBoxLayout()
-        t_info.addWidget(SubtitleLabel("Chạy ngầm ở khay hệ thống"))
-        t_info.addWidget(CaptionLabel("Khi bật: Bấm nút 'X' sẽ thu nhỏ app xuống Tray bar. Khi tắt: Bấm nút 'X' sẽ thoát hẳn."))
+        t_info.addWidget(SubtitleLabel("Minimize to system tray on close"))
+        t_info.addWidget(CaptionLabel("When enabled: Clicking 'X' minimizes app to tray. When disabled: Clicking 'X' exits app."))
 
         self.tray_switch = SwitchButton(self)
         is_minimize_tray = self.settings.value("minimize_to_tray", True, type=bool)
@@ -1211,10 +1315,10 @@ class SettingsWidget(QWidget):
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
                 app_path = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
                 if checked:
-                    winreg.SetValueEx(key, "UbuntuClock", 0, winreg.REG_SZ, app_path)
+                    winreg.SetValueEx(key, "DKClock", 0, winreg.REG_SZ, app_path)
                 else:
                     try:
-                        winreg.DeleteValue(key, "UbuntuClock")
+                        winreg.DeleteValue(key, "DKClock")
                     except FileNotFoundError:
                         pass
                 winreg.CloseKey(key)
@@ -1222,11 +1326,11 @@ class SettingsWidget(QWidget):
             elif system_name == "Linux":
                 autostart_dir = os.path.expanduser("~/.config/autostart")
                 os.makedirs(autostart_dir, exist_ok=True)
-                desktop_file = os.path.join(autostart_dir, "ubuntu_clock.desktop")
+                desktop_file = os.path.join(autostart_dir, "dk_clock.desktop")
                 
                 if checked:
                     exec_cmd = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
-                    content = f"[Desktop Entry]\nType=Application\nName=Ubuntu Clock\nExec={exec_cmd}\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n"
+                    content = f"[Desktop Entry]\nType=Application\nName=DK Clock\nExec={exec_cmd}\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n"
                     with open(desktop_file, "w") as f:
                         f.write(content)
                 else:
@@ -1236,14 +1340,14 @@ class SettingsWidget(QWidget):
             elif system_name == "Darwin": # macOS
                 plist_dir = os.path.expanduser("~/Library/LaunchAgents")
                 os.makedirs(plist_dir, exist_ok=True)
-                plist_file = os.path.join(plist_dir, "com.ubuntu.clock.plist")
+                plist_file = os.path.join(plist_dir, "com.dk.clock.plist")
 
                 if checked:
                     content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key> <string>com.ubuntu.clock</string>
+    <key>Label</key> <string>com.dk.clock</string>
     <key>ProgramArguments</key>
     <array>
         <string>{sys.executable}</string>
@@ -1259,19 +1363,19 @@ class SettingsWidget(QWidget):
                         os.remove(plist_file)
 
         except Exception as e:
-            InfoBar.error("Lỗi", f"Không thể thiết lập khởi động cùng hệ thống: {str(e)}", parent=self)
+            InfoBar.error("Error", f"Failed to set system startup: {str(e)}", parent=self)
 
 
 # ==============================================================================
-# 5. KHUNG CỬA SỔ CHÍNH (CLOCK APP)
+# 5. MAIN WINDOW (CLOCK APP)
 # ==============================================================================
 class ClockApp(FluentWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Ubuntu Modern Clock")
+        self.setWindowTitle("DK Clock v1.0")
         self.resize(750, 480)
         
-        self.settings = QSettings("UbuntuClock", "AppSettings")
+        self.settings = QSettings("DKClock", "AppSettings")
         self.navigationInterface.setAcrylicEnabled(False)
 
         saved_theme = self.settings.value("theme", "LIGHT")
@@ -1282,25 +1386,25 @@ class ClockApp(FluentWindow):
             
         setTheme(self.current_theme)
 
-        # Tạo các Tab
+        # Tab initialization
         self.world_clock = WorldClockWidget(self)
-        self.alarm_widget = AlarmWidget(self) # Tab Báo Thức Mới
+        self.alarm_widget = AlarmWidget(self)
         self.timer_widget = TimerWidget(self)
         self.stopwatch = StopwatchWidget(self)
-        self.settings_widget = SettingsWidget(self) # Tab Cài Đặt Mới
+        self.settings_widget = SettingsWidget(self)
 
-        # Tích hợp Navigation
+        # Navigation integration
         self.addSubInterface(self.world_clock, icon=FIF.GLOBE, text='World Clock')
         self.addSubInterface(self.alarm_widget, icon=FIF.HISTORY, text='Alarm')
         self.addSubInterface(self.timer_widget, icon=FIF.ALBUM, text='Timer')
         self.addSubInterface(self.stopwatch, icon=FIF.HISTORY, text='Stopwatch')
         self.addSubInterface(self.settings_widget, icon=FIF.SETTING, text='Settings', position=NavigationItemPosition.BOTTOM)
 
-        # Nút đổi theme
+        # Theme toggle button
         self.navigationInterface.addItem(
             routeKey='theme_toggle',
             icon=FIF.CONSTRACT,
-            text='Đổi giao diện',
+            text='Toggle Theme',
             onClick=self.toggle_theme,
             selectable=False,
             position=NavigationItemPosition.BOTTOM
@@ -1316,6 +1420,17 @@ class ClockApp(FluentWindow):
         is_dark = (self.current_theme == Theme.DARK)
         self.timer_widget.update_theme(is_dark)
         self.stopwatch.update_theme(is_dark)
+
+
+    def switch_to_tab(self, index: int):
+        """Hiển thị lại ứng dụng và chuyển sang tab tương ứng (1: Alarm, 2: Timer)"""
+        if self.isHidden() or self.isMinimized():
+            self.showNormal()
+            self.activateWindow()
+        
+        # Chuyển tab trong FluentWindow
+        self.stackedWidget.setCurrentIndex(index)
+
 
     def toggle_theme(self):
         if self.current_theme == Theme.LIGHT:
@@ -1343,25 +1458,21 @@ class ClockApp(FluentWindow):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         sys_name = platform.system()
 
-        # Chọn file theo hệ điều hành: Windows dùng .ico, Linux/Mac dùng .png
         if sys_name == "Windows":
             icon_path = os.path.join(base_dir, "assets", "icon.ico")
         else:
             icon_path = os.path.join(base_dir, "assets", "icon.png")
 
-        # Fallback phòng trường hợp file .ico hoặc .png bị thiếu
         if not os.path.exists(icon_path):
             icon_path = os.path.join(base_dir, "assets", "icon.png")
 
         if os.path.exists(icon_path):
             self.tray_icon.setIcon(QIcon(icon_path))
         else:
-            # Nếu lỡ quên chép cả 2 file vào assets thì lấy icon mặc định của hệ thống
             self.tray_icon.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon))
 
-        # Tạo menu khi click chuột phải vào khay
-        show_action = QAction("Hiển thị", self)
-        quit_action = QAction("Thoát", self)
+        show_action = QAction("Show", self)
+        quit_action = QAction("Exit", self)
         
         show_action.triggered.connect(self.showNormal)
         quit_action.triggered.connect(QApplication.instance().quit)
@@ -1383,15 +1494,14 @@ class ClockApp(FluentWindow):
                 self.hide()
 
     def closeEvent(self, event: QCloseEvent):
-        # Đọc cấu hình xem có cho phép chạy ngầm khi bấm X không
         minimize_to_tray = self.settings.value("minimize_to_tray", True, type=bool)
         
         if minimize_to_tray:
             event.ignore()
             self.hide()
             self.tray_icon.showMessage(
-                "Đang chạy ngầm",
-                "Ứng dụng vẫn đang chạy ngầm ở khay hệ thống.",
+                "Running in Background",
+                "DK Clock is still running in the system tray.",
                 QSystemTrayIcon.MessageIcon.Information,
                 2000
             )
@@ -1399,13 +1509,51 @@ class ClockApp(FluentWindow):
             event.accept()
             QApplication.instance().quit()
 
-
 if __name__ == '__main__':
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
+    # Tên ID duy nhất nhận diện Instance của ứng dụng
+    SOCKET_KEY = "DKClock_Unique_SingleInstance_ServerKey"
+
+    # 1. Thử kết nối tới Server của Instance đã chạy trước đó
+    socket = QLocalSocket()
+    socket.connectToServer(SOCKET_KEY)
+
+    # Nếu kết nối thành công -> Đã có 1 instance đang chạy!
+    if socket.waitForConnected(500):
+        # Gửi tín hiệu báo instance cũ hiện cửa sổ lên, rồi thoát instance mới này
+        socket.write(b"SHOW_WINDOW")
+        socket.waitForBytesWritten(1000)
+        socket.disconnectFromServer()
+        sys.exit(0)
+
+    # 2. Nếu chưa có instance nào -> Lắng nghe tín hiệu từ các lần mở sau
+    local_server = QLocalServer()
+    # Dọn dẹp socket cũ rác nếu app từng bị crash đột ngột
+    QLocalServer.removeServer(SOCKET_KEY)
+    local_server.listen(SOCKET_KEY)
+
+    # Khai báo cửa sổ chính
     window = ClockApp()
+
+    # Xử lý khi có instance thứ 2 kết nối tới
+    def handle_new_connection():
+        client_socket = local_server.nextPendingConnection()
+        if client_socket:
+            client_socket.waitForReadyRead(500)
+            msg = client_socket.readAll().data().decode('utf-8')
+            if msg == "SHOW_WINDOW":
+                # Kích hoạt lại cửa sổ chính nổi lên trên
+                if window.isHidden() or window.isMinimized():
+                    window.showNormal()
+                window.activateWindow()
+                window.raise_()
+            client_socket.disconnectFromServer()
+
+    local_server.newConnection.connect(handle_new_connection)
+
     window.show()
     sys.exit(app.exec())

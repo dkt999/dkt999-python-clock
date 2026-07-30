@@ -1,19 +1,48 @@
 #!/usr/bin/env bash
 # ============================================================================
 # build_deb.sh — Đóng gói DK Clock v1.0 thành file .deb cho Ubuntu / Debian
+# (Tự động tăng version sau mỗi lần build để cài đè/nâng cấp)
 # ============================================================================
 set -e
 
 APP_ID="dk-clock"                      # tên gói deb (viết thường, gạch ngang)
 APP_DISPLAY_NAME="DK Clock v1.0"       # Tên hiển thị trên App Menu
 APP_EXEC_NAME="DKClock"                # Tên file binary đã build trong dist/
-MAINTAINER="Thach Dinh Kim <you@example.com>"
+MAINTAINER="Dinh Kim Thach <dinhkimthach@gmail.com>"
 ARCH="amd64"
 ICON_SRC="assets/icon.png"             # Dùng trực tiếp icon.png
 BUILD_SCRIPT="./build_ubuntu.sh"
+VERSION_FILE="VERSION.txt"
 
-VERSION="1.0"
-echo "==> Version gói: $VERSION"
+# --- 0. Quản lý & Tự động tăng Version ---
+if [ ! -f "$VERSION_FILE" ]; then
+    echo "1.0.0" > "$VERSION_FILE"
+fi
+
+# Đọc version hiện tại
+CURRENT_VERSION=$(cat "$VERSION_FILE" | tr -d ' \n\r')
+
+# Tách chuỗi Major.Minor.Build (Ví dụ: 1.0.0 -> 1.0 và 0)
+BASE_VERSION=$(echo "$CURRENT_VERSION" | awk -F. '{print $1"."$2}')
+BUILD_NUM=$(echo "$CURRENT_VERSION" | awk -F. '{print $3}')
+
+# Nếu chưa có Build_Num thì gán bằng 0
+if [ -z "$BUILD_NUM" ]; then
+    BUILD_NUM=0
+fi
+
+# Tăng Build Number lên 1
+NEXT_BUILD_NUM=$((BUILD_NUM + 1))
+NEW_VERSION="${BASE_VERSION}.${NEXT_BUILD_NUM}"
+
+# Cập nhật lại vào file VERSION.txt
+echo "$NEW_VERSION" > "$VERSION_FILE"
+VERSION="$NEW_VERSION"
+
+echo "=========================================="
+echo "==> Version cũ: $CURRENT_VERSION"
+echo "==> Version mới (Auto-increment): $VERSION"
+echo "=========================================="
 
 # --- 1. Build binary mới nhất ---
 if [ ! -x "$BUILD_SCRIPT" ]; then
@@ -108,7 +137,5 @@ dpkg-deb --build --root-owner-group "$PKG_ROOT" "$OUT_DEB"
 
 echo ""
 echo "✅ Đã tạo thành công: ${OUT_DEB}"
-echo "   Lệnh cài đặt thử nghiệm:"
+echo "   Lệnh cài đè / nâng cấp:"
 echo "     sudo apt install ./${OUT_DEB}"
-echo "   Lệnh gỡ cài đặt:"
-echo "     sudo apt remove ${APP_ID}"
