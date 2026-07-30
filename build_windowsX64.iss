@@ -1,6 +1,6 @@
 #define AppName "DK Clock v1.0"
 #define AppVersion "1.0.0"
-#define AppPublisher "DK"
+#define AppPublisher "Dinh Kim Thach (dinhkimthach.name.vn)"
 #define AppExeName "DKClock.exe"
 
 ; Tên file .exe đầu ra: dk-clock_<version>_amd64.exe

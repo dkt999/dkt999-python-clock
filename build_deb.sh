@@ -8,7 +8,7 @@ set -e
 APP_ID="dk-clock"                      # tên gói deb (viết thường, gạch ngang)
 APP_DISPLAY_NAME="DK Clock v1.0"       # Tên hiển thị trên App Menu
 APP_EXEC_NAME="DKClock"                # Tên file binary đã build trong dist/
-MAINTAINER="Dinh Kim Thach <dinhkimthach@gmail.com>"
+MAINTAINER="Dinh Kim Thach <dinhkimthach.name.vn>"
 ARCH="amd64"
 ICON_SRC="assets/icon.png"             # Dùng trực tiếp icon.png
 BUILD_SCRIPT="./build_ubuntu.sh"
