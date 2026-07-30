@@ -1,27 +1,23 @@
-#define AppName "AikaMessenger"
+#define AppName "DK Clock v1.0"
 #define AppVersion "1.0.0"
-#define AppPublisher "Aika"
-#define AppExeName "AikaMessenger.exe"
+#define AppPublisher "DK"
+#define AppExeName "DKClock.exe"
 
-; Dùng cho tên file .exe đầu ra: aikamessenger_<version>_amd64.exe
-; PackageId/Arch cố định, BuildVersion truyền từ dòng lệnh (ISCC /DBuildVersion=...) khi build từ
-; build_windowsX64.ps1 - nếu build tay không truyền /D thì dùng giá trị mặc định bên dưới.
-#define PackageId "aikamessenger"
+; Tên file .exe đầu ra: dk-clock_<version>_amd64.exe
+#define PackageId "dk-clock"
 #define Arch "amd64"
 #ifndef BuildVersion
   #define BuildVersion "1.0.0"
 #endif
 
 [Setup]
-AppId={{AikaMessenger}}
+AppId={{DKClock_SingleInstance_AppID}}
 AppName={#AppName}
-AppVersion={#AppVersion}
+AppVersion={#BuildVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={autopf}\{#AppName}
+DefaultDirName={autopf}\DKClock
 DefaultGroupName={#AppName}
-; lowest = cài cho riêng user hiện tại, KHÔNG hiện popup UAC xin quyền admin - {autopf}/{group}/
-; {autodesktop} phía trên tự động trỏ sang thư mục riêng của user (%LOCALAPPDATA%\Programs...)
-; khi chạy ở chế độ này, không cần sửa gì thêm ở [Files]/[Icons].
+; PrivilegesRequired=lowest giúp cài cho riêng user hiện tại, không bắt buộc quyền Admin/UAC
 PrivilegesRequired=lowest
 OutputDir=installer\windows
 OutputBaseFilename={#PackageId}_{#BuildVersion}_{#Arch}
@@ -29,7 +25,7 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 
-SetupIconFile=assets\image\icon.ico
+SetupIconFile=assets\icon.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
