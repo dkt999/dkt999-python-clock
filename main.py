@@ -1313,7 +1313,7 @@ class SettingsWidget(QWidget):
         layout.setSpacing(20)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        title = TitleLabel("System Settings", self)
+        title = TitleLabel("Settings", self)
         layout.addWidget(title)
 
         # Card 1: Run at startup
@@ -1341,7 +1341,7 @@ class SettingsWidget(QWidget):
 
         t_info = QVBoxLayout()
         t_info.addWidget(SubtitleLabel("Minimize to system tray on close"))
-        t_info.addWidget(CaptionLabel("When enabled: Clicking 'X' minimizes app to tray. When disabled: Clicking 'X' exits app."))
+        t_info.addWidget(CaptionLabel("When enabled: Clicking [Close] minimizes app to tray. When disabled: Clicking [Close] exits app."))
 
         self.tray_switch = SwitchButton(self)
         is_minimize_tray = self.settings.value("minimize_to_tray", True, type=bool)
