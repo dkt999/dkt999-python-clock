@@ -4,17 +4,54 @@ import platform
 import subprocess
 import shutil
 from PyQt6.QtCore import Qt, QTimer, QTime, QDateTime, QTimeZone, QPoint, QPointF, QUrl, QSettings
-from PyQt6.QtGui import QIcon, QAction, QCloseEvent, QPainter, QColor, QPen, QBrush, QIntValidator
+from PyQt6.QtGui import QIcon, QAction, QCloseEvent, QPainter, QColor, QPen, QBrush, QIntValidator, QPixmap
 from PyQt6.QtMultimedia import QSoundEffect
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                              QSystemTrayIcon, QMenu, QStackedWidget, QFrame, QLabel, QGridLayout, QSizePolicy)
 from qfluentwidgets import (FluentWindow, LargeTitleLabel, PrimaryPushButton, 
                             PushButton, setTheme, Theme, CaptionLabel, ToolButton, SmoothScrollArea,
-                            TransparentToolButton, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
+                            FluentIconBase, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
                             NavigationItemPosition, SwitchButton, CheckBox, TitleLabel, SubtitleLabel,
-                            ComboBox, CardWidget)
+                            ComboBox, CardWidget, isDarkTheme)
+import tempfile
 
+class CustomSVGIcon(FluentIconBase):
+    def __init__(self, relative_path: str, size: int = 28, extra: int = 4):
+        super().__init__()
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.full_path = os.path.join(base_dir, relative_path)
+        self.icon_size = size
+        self.extra = extra   # số pixel phóng to thêm mỗi cạnh
+        self._cache = {}
+
+    def path(self, theme=Theme.AUTO) -> str:
+        is_dark = (theme == Theme.DARK) or (theme == Theme.AUTO and isDarkTheme())
+        key = "dark" if is_dark else "light"
+
+        if key in self._cache and os.path.exists(self._cache[key]):
+            return self._cache[key]
+
+        with open(self.full_path, "r", encoding="utf-8") as f:
+            svg_content = f.read()
+
+        target_color = "#FFFFFF" if is_dark else "#1A1A1A"
+        svg_content = svg_content.replace('stroke="#000000"', f'stroke="{target_color}"')
+        svg_content = svg_content.replace('fill="#000000"', f'fill="{target_color}"')
+
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".svg", delete=False, encoding="utf-8")
+        tmp.write(svg_content)
+        tmp.close()
+
+        self._cache[key] = tmp.name
+        return tmp.name
+
+    def render(self, painter, rect, **kwargs):
+        # Nới rect ra để icon to hơn khung mặc định của nav bar
+        enlarged_rect = rect.adjusted(-self.extra, -self.extra, self.extra, self.extra)
+        super().render(painter, enlarged_rect, **kwargs)
+    
 def send_linux_notification(title, content, app_name="DK Clock"):
     """Gửi thông báo Pop-up Banner chuẩn Linux/Ubuntu thông qua notify-send"""
     if platform.system() == "Linux":
@@ -1406,14 +1443,21 @@ class ClockApp(FluentWindow):
         self.timer_widget = TimerWidget(self)
         self.stopwatch = StopwatchWidget(self)
         self.settings_widget = SettingsWidget(self)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        img_dir = os.path.join(base_dir, "assets", "image")
+        ICON_SIZE = 20
+        world_icon = CustomSVGIcon("assets/image/worldclock.svg", size=ICON_SIZE)
+        alarm_icon = CustomSVGIcon("assets/image/alarm.svg", size=ICON_SIZE)
+        timer_icon = CustomSVGIcon("assets/image/timer.svg", size=ICON_SIZE)
+        stopwatch_icon = CustomSVGIcon("assets/image/stopwatch.svg", size=ICON_SIZE)
 
         # Navigation integration
-        self.addSubInterface(self.world_clock, icon=FIF.GLOBE, text='World Clock')
-        self.addSubInterface(self.alarm_widget, icon=FIF.HISTORY, text='Alarm')
-        self.addSubInterface(self.timer_widget, icon=FIF.ALBUM, text='Timer')
-        self.addSubInterface(self.stopwatch, icon=FIF.HISTORY, text='Stopwatch')
+        self.addSubInterface(self.world_clock, icon=world_icon, text='World Clock')
+        self.addSubInterface(self.alarm_widget, icon=alarm_icon, text='Alarm')
+        self.addSubInterface(self.timer_widget, icon=timer_icon, text='Timer')
+        self.addSubInterface(self.stopwatch, icon=stopwatch_icon, text='Stopwatch')
         self.addSubInterface(self.settings_widget, icon=FIF.SETTING, text='Settings', position=NavigationItemPosition.BOTTOM)
-
+        self.enlarge_navigation_icons(size=30)
         # Theme toggle button
         self.navigationInterface.addItem(
             routeKey='theme_toggle',
@@ -1435,7 +1479,17 @@ class ClockApp(FluentWindow):
         self.timer_widget.update_theme(is_dark)
         self.stopwatch.update_theme(is_dark)
 
+    def enlarge_navigation_icons(self, size: int = 28):
+        from PyQt6.QtCore import QSize
 
+        # Ép kích thước icon chuẩn của Navigation Interface
+        if hasattr(self.navigationInterface, 'setIconSize'):
+            self.navigationInterface.setIconSize(QSize(size, size))
+
+        # Ép kích thước cho tất cả các button con trên Menu
+        for btn in self.navigationInterface.findChildren(QWidget):
+            if hasattr(btn, 'setIconSize'):
+                btn.setIconSize(QSize(size, size))
     def switch_to_tab(self, index: int):
         """Hiển thị lại ứng dụng và chuyển sang tab tương ứng (1: Alarm, 2: Timer)"""
         if self.isHidden() or self.isMinimized():
@@ -1457,6 +1511,8 @@ class ClockApp(FluentWindow):
         setTheme(self.current_theme)
         
         is_dark = (self.current_theme == Theme.DARK)
+        if hasattr(self, 'navigationInterface'):
+            self.navigationInterface.update()
         if hasattr(self, 'timer_widget'):
             self.timer_widget.update_theme(is_dark)
         if hasattr(self, 'world_clock'):
