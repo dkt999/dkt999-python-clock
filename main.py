@@ -740,7 +740,7 @@ class AlarmWidget(QWidget):
         is_24h_config = self.world_settings.value("is_24h_format", True, type=bool)
         self.time_picker.set_format_24h(is_24h_config)
         self.time_picker.set_time(QTime.currentTime())
-        
+        self.label_input.clear()
         self.content_stack.setCurrentIndex(1)
         self.add_btn.setVisible(False)
 
