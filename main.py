@@ -14,7 +14,7 @@ from qfluentwidgets import (FluentWindow, LargeTitleLabel, PrimaryPushButton,
                             PushButton, setTheme, Theme, CaptionLabel, ToolButton, SmoothScrollArea,
                             FluentIconBase, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
                             NavigationItemPosition, SwitchButton, CheckBox, TitleLabel, SubtitleLabel,
-                            ComboBox, CardWidget, isDarkTheme)
+                            ComboBox, CardWidget, isDarkTheme, ColorSettingCard, setThemeColor, ColorConfigItem, BodyLabel)
 import tempfile
 
 class CustomSVGIcon(FluentIconBase):
@@ -346,7 +346,7 @@ class WorldClockWidget(QWidget):
 
         self.all_cities = [
             # --- ASIA / PACIFIC ---
-            ("Asia/Ho_Chi_Minh", "Vietnam (Hanoi/HCMC)"),
+            ("Asia/Ho_Chi_Minh", "Vietnam (Hanoi)"),
             ("Asia/Tokyo", "Japan (Tokyo)"),
             ("Asia/Seoul", "South Korea (Seoul)"),
             ("Asia/Bangkok", "Thailand (Bangkok)"),
@@ -394,7 +394,7 @@ class WorldClockWidget(QWidget):
         ]
 
         default_tzs = [
-            "Asia/Ho_Chi_Minh", # Việt Nam (Hà Nội/HCMC)
+            "Asia/Ho_Chi_Minh", # Việt Nam (Hà Nội)
             "Asia/Tokyo",       # Nhật Bản (Tokyo)
             "Asia/Shanghai",    # Trung Quốc (Beijing/Shanghai)
             "America/New_York"  # Mỹ (New York)
@@ -412,7 +412,7 @@ class WorldClockWidget(QWidget):
         self.main_layout.setContentsMargins(15, 15, 15, 15)
 
         self.top_bar = QHBoxLayout()
-        
+
         self.format_switch = SwitchButton(self)
         self.format_switch.setOnText("24-Hour")
         self.format_switch.setOffText("12-Hour")
@@ -428,7 +428,8 @@ class WorldClockWidget(QWidget):
         self.config_btn = PushButton("Timezone Settings", self, FIF.SETTING)
         self.config_btn.clicked.connect(self.toggle_settings_panel)
 
-        self.top_bar.addWidget(QLabel("Format:"))
+        # Thêm BodyLabel chuẩn không kèm parent self
+        self.top_bar.addWidget(BodyLabel("Format:"))
         self.top_bar.addWidget(self.format_switch)
         self.top_bar.addSpacing(15)
         self.top_bar.addWidget(self.sec_switch)
@@ -579,8 +580,9 @@ class AlarmGridItem(QFrame):
 
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(16, 12, 16, 12)
-        main_layout.setSpacing(12)
+        main_layout.setSpacing(10)
 
+        # Thông tin giờ và nhãn
         info_layout = QVBoxLayout()
         info_layout.setContentsMargins(0, 0, 0, 0)
         info_layout.setSpacing(2)
@@ -598,15 +600,45 @@ class AlarmGridItem(QFrame):
 
         main_layout.addLayout(info_layout, stretch=1)
 
+        # Switch Bật/Tắt
         self.switch_btn = SwitchButton(self)
         self.switch_btn.setChecked(is_enabled)
         self.switch_btn.checkedChanged.connect(self.on_switch_toggled)
 
+        # Nút STOP (Nằm gọn gàng cạnh nút Delete)
+        self.stop_btn = PrimaryPushButton("Stop", self)
+        self.stop_btn.setFixedSize(60, 32)
+        self.stop_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #E74C3C;
+                border: none;
+                color: white;
+                font-weight: bold;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #C0392B;
+            }
+        """)
+        self.stop_btn.clicked.connect(self.parent_widget.stop_alarm_sound)
+        self.stop_btn.hide()
+
+        # Nút Delete
         self.del_btn = ToolButton(FIF.DELETE, self)
         self.del_btn.clicked.connect(lambda: self.parent_widget.delete_alarm(self.alarm_id))
 
+        # Add theo đúng thứ tự: [Switch] -> [Stop] -> [Delete]
         main_layout.addWidget(self.switch_btn)
+        main_layout.addWidget(self.stop_btn)
         main_layout.addWidget(self.del_btn)
+
+    def show_stop_button(self, show: bool):
+        if show:
+            self.stop_btn.show()
+            self.switch_btn.hide()
+        else:
+            self.stop_btn.hide()
+            self.switch_btn.show()
 
     def on_switch_toggled(self, checked):
         self.is_enabled = checked
@@ -626,7 +658,6 @@ class AlarmGridItem(QFrame):
         """)
         self.time_lbl.setStyleSheet(f"color: {text_color}; opacity: {1.0 if self.is_enabled else 0.4};")
         self.tag_lbl.setStyleSheet(f"color: {text_color}; opacity: {0.7 if self.is_enabled else 0.3};")
-
 
 class AlarmWidget(QWidget):
     def __init__(self, parent=None):
@@ -756,11 +787,20 @@ class AlarmWidget(QWidget):
         self.settings.setValue("alarm_list", self.alarms)
 
     def stop_alarm_sound(self):
-        if self.alarm_sound.isPlaying():
+        if hasattr(self, 'alarm_sound') and self.alarm_sound.isPlaying():
             self.alarm_sound.stop()
-        if self.current_infobar:
-            self.current_infobar.close()
-            self.current_infobar = None
+
+        if getattr(self, 'current_infobar', None) is not None:
+            try:
+                self.current_infobar.close()
+            except RuntimeError:
+                pass
+            finally:
+                self.current_infobar = None
+
+        if hasattr(self, 'card_widgets'):
+            for card in self.card_widgets:
+                card.show_stop_button(False)
 
     def check_alarms(self):
         now_str = QTime.currentTime().toString("hh:mm")
@@ -772,7 +812,11 @@ class AlarmWidget(QWidget):
                     if self.alarm_sound.source().isValid():
                         self.alarm_sound.play()
 
-                    # 1. InfoBar trên ứng dụng
+                    # CHỈ HIỆN NÚT STOP TRÊN THẺ CÓ ALARM_ID TRÙNG KHỚP
+                    for card in self.card_widgets:
+                        if card.alarm_id == alarm["id"]:
+                            card.show_stop_button(True)
+
                     self.current_infobar = InfoBar.success(
                         title='ALARM!',
                         content=f"Time's up: {alarm['time']} ({alarm['label']})",
@@ -782,15 +826,12 @@ class AlarmWidget(QWidget):
                         duration=0,
                         parent=self
                     )
-                    self.current_infobar.closedSignal.connect(self.stop_alarm_sound)
 
-                    # 2. Bắn Pop-up Banner chuẩn Ubuntu
                     send_linux_notification(
                         "ALARM!",
                         f"Time's up: {alarm['time']} ({alarm['label']})"
                     )
 
-                    # 3. Vẫn giữ Tray Icon message cho Windows/macOS
                     main_window = self.window()
                     if hasattr(main_window, 'tray_icon'):
                         try:
@@ -799,7 +840,7 @@ class AlarmWidget(QWidget):
                             pass
 
                         main_window.tray_icon.messageClicked.connect(
-                            lambda: (main_window.switch_to_tab(1), self.stop_alarm_sound())
+                            lambda: main_window.switch_to_tab(1)
                         )
 
                         main_window.tray_icon.showMessage(
@@ -902,7 +943,6 @@ class TimerWidget(QWidget):
         self.setObjectName("timerWidget")
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.current_infobar = None
-        
         self.settings = QSettings("DKClock", "TimerSettings")
         self.saved_timers_list = []
 
@@ -938,10 +978,30 @@ class TimerWidget(QWidget):
         self.btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.start_btn = PrimaryPushButton("Start", self)
+        #self.start_btn.setFixedWidth(60)
+
         self.stop_btn = PushButton("Pause", self)
-        self.reset_btn = PushButton("Reset", self)
+        self.reset_btn = PushButton("Stop", self)
+        self.reset_btn.setStyleSheet("""
+            PushButton {
+                background-color: #E74C3C;
+                border: 1px solid #E74C3C;
+                color: white;
+                border-radius: 5px;
+                padding: 5px;
+                width:50px;
+            }
+            PushButton:hover {
+                background-color: #C0392B;
+                border: 1px solid #C0392B;
+            }
+            PushButton:pressed {
+                background-color: #A93226;
+                border: 1px solid #A93226;
+            }
+        """)
         self.stop_btn.setEnabled(False) 
-        
+        self.reset_btn.setEnabled(False)
         self.btn_layout.addWidget(self.start_btn)
         self.btn_layout.addWidget(self.stop_btn)
         self.btn_layout.addWidget(self.reset_btn)
@@ -979,11 +1039,18 @@ class TimerWidget(QWidget):
         self.time_input.clearFocus()
 
     def stop_alarm(self):
-        if self.alarm_sound.isPlaying():
+        """Tắt âm chuông Timer an toàn (chống crash RuntimeError)"""
+        
+        if hasattr(self, 'alarm_sound') and self.alarm_sound.isPlaying():
             self.alarm_sound.stop()
-        if self.current_infobar:
-            self.current_infobar.close()
-            self.current_infobar = None
+
+        if getattr(self, 'current_infobar', None) is not None:
+            try:
+                self.current_infobar.close()
+            except RuntimeError:
+                pass
+            finally:
+                self.current_infobar = None
 
     def check_empty_state(self):
         has_items = len(self.saved_timers_list) > 0
@@ -991,9 +1058,8 @@ class TimerWidget(QWidget):
     def load_settings(self):
         saved = self.settings.value("saved_timers")
         
-        # Nếu chưa từng có dữ liệu lưu -> Tạo mặc định 5 phút (300s) và 10 phút (600s)
         if not saved:
-            default_timers = [300, 600] # 5 mins & 10 mins
+            default_timers = [300, 600]
             for secs in default_timers:
                 self.saved_timers_list.append(secs)
                 self.add_saved_timer_ui(secs)
@@ -1036,6 +1102,7 @@ class TimerWidget(QWidget):
         s = seconds % 60
         self.time_input.setText(f"{h:02d}{m:02d}{s:02d}")
         self.action_start(force_new=True)
+        self.reset_btn.setEnabled(True)
 
     def action_start(self, force_new=False):
         self.stop_alarm()
@@ -1063,6 +1130,7 @@ class TimerWidget(QWidget):
         self.start_btn.setText("Resume")
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+        self.reset_btn.setEnabled(True)
 
     def action_pause(self):
         self.stop_alarm()
@@ -1070,6 +1138,17 @@ class TimerWidget(QWidget):
         self.is_paused = True
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        
+    def on_timer_finished(self):
+        """Xử lý khi đếm ngược kết thúc: Dừng đếm nhưng giữ nút Reset để người dùng bấm tắt chuông"""
+        self.timer.stop()
+        self.is_paused = False
+        self.remaining_seconds = 0
+        self.time_input.setReadOnly(False)
+        self.start_btn.setText("Start")
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.reset_btn.setEnabled(True)
 
     def action_reset(self):
         self.stop_alarm()
@@ -1081,17 +1160,18 @@ class TimerWidget(QWidget):
         self.start_btn.setText("Start")
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self.reset_btn.setEnabled(False)
 
     def update_timer(self):
         self.remaining_seconds -= 1
         self.update_display_text()
 
         if self.remaining_seconds <= 0:
-            self.action_reset()
+            self.on_timer_finished()
             if self.alarm_sound.source().isValid():
                 self.alarm_sound.play()
 
-            # 1. InfoBar giao diện
+            # 1. InfoBar giao diện (Click dấu X tự đóng thì ngắt kết nối an toàn)
             self.current_infobar = InfoBar.success(
                 title="Time's Up",
                 content="The countdown timer has finished!",
@@ -1101,12 +1181,14 @@ class TimerWidget(QWidget):
                 duration=0,
                 parent=self
             )
-            self.current_infobar.closedSignal.connect(self.stop_alarm)
+            
+            # 2. Linux Native Notification
             send_linux_notification(
                 "Timer Finished!",
                 "The countdown timer has finished!"
             )
-            # 2. Thông báo khay hệ thống OS (Click vào mở ngay Tab Timer)
+
+            # 3. Notification Khay hệ thống OS (Click chỉ chuyển Tab Timer, KHÔNG ngắt âm)
             main_window = self.window()
             if hasattr(main_window, 'tray_icon'):
                 try:
@@ -1114,9 +1196,9 @@ class TimerWidget(QWidget):
                 except:
                     pass
 
-                # Bấm vào notification -> Mở ứng dụng & chuyển sang Tab Timer (Index = 2)
+                # Bấm notification -> Chỉ hiển thị ứng dụng và chuyển Tab Timer (Index = 2)
                 main_window.tray_icon.messageClicked.connect(
-                    lambda: (main_window.switch_to_tab(2), self.stop_alarm())
+                    lambda: main_window.switch_to_tab(2)
                 )
 
                 main_window.tray_icon.showMessage(
@@ -1151,6 +1233,35 @@ class TimerWidget(QWidget):
             widget = self.scroll_layout.itemAt(i).widget()
             if isinstance(widget, SavedTimerItem):
                 widget.update_theme(text_color, item_border)
+
+        if hasattr(self, "reset_btn"):
+            disabled_bg = "#2A2A2A" if is_dark else "#E5E5E5"
+            disabled_text = "#666666" if is_dark else "#A0A0A0"
+
+            self.reset_btn.setStyleSheet(f"""
+                    PushButton {{
+                        background-color: #E74C3C;
+                        border: 1px solid #E74C3C;
+                        color: white;
+                        border-radius: 5px;
+                        font-weight: bold;
+                        padding:5px;
+                        width:50px;
+                    }}
+                    PushButton:hover {{
+                        background-color: #C0392B;
+                        border: 1px solid #C0392B;
+                    }}
+                    PushButton:pressed {{
+                        background-color: #A93226;
+                        border: 1px solid #A93226;
+                    }}
+                    PushButton:disabled {{
+                        background-color: {disabled_bg};
+                        border: 1px solid {disabled_bg};
+                        color: {disabled_text};
+                    }}
+                """)
 
 class LapItem(QFrame):
     def __init__(self, lap_num, time_str, parent=None):
@@ -1194,7 +1305,8 @@ class StopwatchWidget(QWidget):
         self.left_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.time_display = LargeTitleLabel("00:00:00.00", self)
-        self.time_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.time_display.setFixedWidth(220)
+        self.time_display.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.left_layout.addWidget(self.time_display)
         self.left_layout.addSpacing(20)
 
@@ -1302,7 +1414,9 @@ class StopwatchWidget(QWidget):
 # ==============================================================================
 # 4. TAB SETTINGS
 # ==============================================================================
+accentColorConfig = ColorConfigItem("Style", "AccentColor", "#113260")
 class SettingsWidget(QWidget):
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("settingsWidget")
@@ -1320,11 +1434,16 @@ class SettingsWidget(QWidget):
         autostart_card = CardWidget(self)
         a_layout = QHBoxLayout(autostart_card)
         a_layout.setContentsMargins(16, 16, 16, 16)
-        
+
         a_info = QVBoxLayout()
         a_info.addWidget(SubtitleLabel("Run at system startup"))
-        a_info.addWidget(CaptionLabel("Automatically launch DK Clock on system login (Windows/macOS/Linux)"))
-        
+        a_info.addWidget(
+            CaptionLabel(
+                "Automatically launch DK Clock on system login"
+                " (Windows/macOS/Linux)"
+            )
+        )
+
         self.autostart_switch = SwitchButton(self)
         is_autostart = self.settings.value("autostart", False, type=bool)
         self.autostart_switch.setChecked(is_autostart)
@@ -1341,16 +1460,37 @@ class SettingsWidget(QWidget):
 
         t_info = QVBoxLayout()
         t_info.addWidget(SubtitleLabel("Minimize to system tray on close"))
-        t_info.addWidget(CaptionLabel("When enabled: Clicking [Close] minimizes app to tray. When disabled: Clicking [Close] exits app."))
+        t_info.addWidget(
+            CaptionLabel(
+                "When enabled: Clicking [Close] minimizes app to tray. When"
+                " disabled: Clicking [Close] exits app."
+            )
+        )
 
         self.tray_switch = SwitchButton(self)
-        is_minimize_tray = self.settings.value("minimize_to_tray", True, type=bool)
+        is_minimize_tray = self.settings.value("minimize_to_tray", False, type=bool)
         self.tray_switch.setChecked(is_minimize_tray)
         self.tray_switch.checkedChanged.connect(self.toggle_tray_behavior)
 
         t_layout.addLayout(t_info, stretch=1)
         t_layout.addWidget(self.tray_switch)
         layout.addWidget(tray_card)
+
+        # --- CARD 3: ACCENT COLOR (Mới thêm) ---
+        self.color_card = ColorSettingCard(
+            configItem=accentColorConfig,
+            icon=FIF.PALETTE,
+            title="Accent color",
+            content="Change the primary theme accent color of application",
+            parent=self,
+        )
+        self.color_card.colorChanged.connect(self.on_color_changed)
+        layout.addWidget(self.color_card)
+
+    def on_color_changed(self, color: QColor):
+        color_hex = color.name()
+        self.settings.setValue("accent_color", color_hex)
+        setThemeColor(color)  # Cập nhật màu Accent toàn ứng dụng
 
     def toggle_tray_behavior(self, checked):
         self.settings.setValue("minimize_to_tray", checked)
@@ -1428,6 +1568,9 @@ class ClockApp(FluentWindow):
         
         self.settings = QSettings("DKClock", "AppSettings")
         self.navigationInterface.setAcrylicEnabled(False)
+        
+        saved_color = self.settings.value("accent_color", "#113260", type=str)
+        setThemeColor(QColor(saved_color))
 
         saved_theme = self.settings.value("theme", "LIGHT")
         if saved_theme == "DARK":
@@ -1507,19 +1650,26 @@ class ClockApp(FluentWindow):
         else:
             self.current_theme = Theme.LIGHT
             self.settings.setValue("theme", "LIGHT")
-        
+
         setTheme(self.current_theme)
-        
-        is_dark = (self.current_theme == Theme.DARK)
-        if hasattr(self, 'navigationInterface'):
+
+        # --- TÙY CHỈNH MÀU NỀN CHO CỬA SỔ CHÍNH ---
+        is_dark = self.current_theme == Theme.DARK
+        if not is_dark:
+            # Mã màu #E5E5E5 sẽ tối & dịu mắt hơn nhiều so với màu trắng xám mặc định (#F3F3F3)
+            self.setStyleSheet("ClockApp { background-color: #E5E5E5; }")
+        else:
+            self.setStyleSheet("")  # Trả lại mặc định cho Dark Mode
+
+        if hasattr(self, "navigationInterface"):
             self.navigationInterface.update()
-        if hasattr(self, 'timer_widget'):
+        if hasattr(self, "timer_widget"):
             self.timer_widget.update_theme(is_dark)
-        if hasattr(self, 'world_clock'):
+        if hasattr(self, "world_clock"):
             self.world_clock.update_clocks()
-        if hasattr(self, 'stopwatch'):
+        if hasattr(self, "stopwatch"):
             self.stopwatch.update_theme(is_dark)
-        if hasattr(self, 'alarm_widget'):
+        if hasattr(self, "alarm_widget"):
             self.alarm_widget.update_theme()
 
     def setup_system_tray(self):
@@ -1541,7 +1691,7 @@ class ClockApp(FluentWindow):
         else:
             self.tray_icon.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon))
 
-        show_action = QAction("Show", self)
+        show_action = QAction("Restore Window", self)
         quit_action = QAction("Exit", self)
         
         show_action.triggered.connect(self.showNormal)
@@ -1564,17 +1714,11 @@ class ClockApp(FluentWindow):
                 self.hide()
 
     def closeEvent(self, event: QCloseEvent):
-        minimize_to_tray = self.settings.value("minimize_to_tray", True, type=bool)
+        minimize_to_tray = self.settings.value("minimize_to_tray", False, type=bool)
         
         if minimize_to_tray:
             event.ignore()
             self.hide()
-            self.tray_icon.showMessage(
-                "Running in Background",
-                "DK Clock is still running in the system tray.",
-                QSystemTrayIcon.MessageIcon.Information,
-                2000
-            )
         else:
             event.accept()
             QApplication.instance().quit()
